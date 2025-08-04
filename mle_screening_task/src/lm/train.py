@@ -319,7 +319,7 @@ def main():
     tokens = []
     for i, qa in enumerate(qa_list):
         tokens.append(tokenizer.encode(text_data))
-        print("Trained on " + i + "out of " + n_qa + " examples.")
+        print(f"Trained on {i} out of {n_qa} examples.")
 
     train_n = int(0.8 * len(tokens))
     #print(train_n)
