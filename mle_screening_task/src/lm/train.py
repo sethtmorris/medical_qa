@@ -302,15 +302,20 @@ def main():
     # prepare data and data generator
     assert config.seq_len <= config.model_config.n_positions
 
-    file_path = "../data/mle_screening_dataset.csv"
+    file_path = "data/mle_screening_dataset.csv"
     text_data = ""
     qa_list = []
+    q_list = []
+    a_list = []
     with open(file_path, 'r') as csv_file:
         csv_reader = csv.reader(csv_file)
         for row in csv_reader:
             #print(row)
             text_data += row[0] + '\n'
             qa_list.append(row[0])
+            qa = row[0].split(',')
+            q_list.append(qa[0]+'\n')
+            a_list.append(qa[-1]+'\n')
 
     #input_ids = tokenizer.encode(text_data, add_special_tokens=True) #np.load("data/tokens.npz")
     #tokenizer = new UnicodeBPETokenizer()
@@ -324,8 +329,19 @@ def main():
     train_n = int(0.8 * len(tokens))
     #print(train_n)
 
-    train_tokens = torch.tensor(tokens[0:train_n])
-    val_tokens = torch.tensor(tokens[train_n:-1])
+    n_qa = len(q_list)
+    test_n = int(0.8 * n_qa)
+
+    prefixed_question_file_path = "data/prefixed_test_questions.txt"
+    with open(prefixed_question_file_path, 'w') as question_file:
+        question_file.writelines(q_list[test_n:])
+
+    test_answers_file_path = "data/test_answers.txt"
+    with open(test_answers_file_path, 'w') as answer_file:
+        answer_file.writelines(a_list[test_n:])
+
+    train_tokens = torch.tensor(tokens[:train_n])
+    val_tokens = torch.tensor(tokens[train_n:])
 
     train_sampler = random_batch_sampler(
         train_tokens, device, config.batch_size, config.seq_len

@@ -159,7 +159,7 @@ def main():
     parser.add_argument(
         "--max_new_tokens",
         type=int,
-        default=32,
+        default=128,
         help="number of new tokens to generate",
     )
     parser.add_argument(
@@ -169,7 +169,7 @@ def main():
     args = parser.parse_args()
     config = args.config
     with open(args.prefixes) as f:
-        prefixes = [json.loads(line)["prefix"] for line in f]
+        questions = [line[:-1] for line in f]
     max_new_tokens = args.max_new_tokens
     temperature = args.temperature
 
@@ -187,7 +187,7 @@ def main():
         model,
         device,
         tokenizer,
-        prefixes,
+        questions,
         config.batch_size,
         max_new_tokens,
         temperature,
@@ -196,8 +196,9 @@ def main():
     generation_path = os.path.join(config.output_dir, "generation.jsonl")
     print(f"writing generations to {generation_path}")
     with open(generation_path, "w") as f:
-        for prefix, generation in zip(prefixes, generations):
-            json.dump({"prefix": prefix, "generation": generation}, f)
+        for question, generation in zip(questions, generations):
+            print(generation)
+            json.dump({"prefix": question, "generation": generation}, f)
             f.write("\n")
 
     print("done!")
