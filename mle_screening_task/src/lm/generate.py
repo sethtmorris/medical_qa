@@ -3,14 +3,15 @@ import json
 import os
 import math
 
-import tiktoken
 import torch
+import torch.nn.functional as F
 from omegaconf import OmegaConf
 from tqdm import trange
 from lm.model import DecoderLM
 from lm.utils import determine_device, enable_tf32
 from lm.train import compute_language_modeling_loss
 
+from lm.tokenizer.bpe import UnicodeBPETokenizer
 
 def softmax_with_temperature(
     logits: torch.FloatTensor, temperature: float
@@ -28,19 +29,26 @@ def softmax_with_temperature(
     # to avoid division by 0
     #print(logits.shape)
     temperature = max(temperature, 5e-2) #1e-5)
+    '''
     num = torch.exp(logits / temperature)
-    #print(num)
+    print(num)
     den = torch.transpose(torch.sum(num, axis=-1).repeat(logits.size(-1), 1), 0, 1)
-    #print(den)
+    print(den)
 
-    return torch.div(num, den)
+    probabilities = torch.div(num, den)
+    '''
+    #min_val = probabilities.min()
+    #max_val = probabilities.max()
+    #normalized_probabilities = (probabilities - min_val) / (max_val - min_val)
+
+    return F.softmax(logits / temperature, dim=-1) #torch.nan_to_num(normalized_probabilities, posinf=1.0, neginf=0.0)
 
 
 @torch.inference_mode()
 def generate(
     model: DecoderLM,
     device: str,
-    tokenizer: tiktoken.Encoding,
+    tokenizer: UnicodeBPETokenizer,
     prefixes: list[str],
     batch_size: int,
     max_new_tokens: int = 32,
@@ -65,10 +73,16 @@ def generate(
         sequences have equal length. `attention_mask` should be set to 0.0 for
         padding tokens, and 1.0 everywhere else.
     """
-    tokens_list = tokenizer.encode_batch(prefixes, allowed_special={"<|endoftext|>"})
+    '''
+    tokens_list = []
+    for prefix in prefixes:
+        print(prefix)
+        tokens_list.append(tokenizer.encode(prefixes)) #encode_batch(prefixes, allowed_special={"<|endoftext|>"})
+    '''
+    tokens_list = [tokenizer.encode(prefix) for prefix in prefixes]
     #print(tokens_list)
     #print(max(tokens_list))
-    seq_len = 128
+    seq_len = 64
     #seq_n = 0
     equal_len_tokens = []
     attention_mask = []
@@ -80,7 +94,7 @@ def generate(
            #print(equal_len_tokens) #seq_n += 1
         #print(len(sequence))
         # Make [tokenizer.eot_token]
-        left_padded_tokens = [tokenizer.eot_token] * (seq_len - len(sequence)) + sequence
+        left_padded_tokens = [65535] * (seq_len - len(sequence)) + sequence
         #print(left_padded_tokens)
         equal_len_tokens.append(left_padded_tokens)
         attention_mask.append(([0.0] * (seq_len - len(sequence))) + ([1.0] * len(sequence)))
@@ -90,13 +104,13 @@ def generate(
     batched_tokens = []
     batched_masks = []
     if batch_size is None or len(equal_len_tokens) < batch_size:
-        tokens = torch.tensor(equal_len_tokens, dtype=torch.long)
+        tokens = torch.tensor(equal_len_tokens, dtype=torch.uint16)
         batched_tokens.append(tokens)
         mask = torch.tensor(attention_mask, dtype=torch.float)
         batched_masks.append(mask)
     else:
         while len(equal_len_tokens) / batch_size > 0:
-            tokens = torch.tensor(equal_len_tokens[:batch_size], dtype=torch.long)
+            tokens = torch.tensor(equal_len_tokens[:batch_size], dtype=torch.uint16)
             batched_tokens.append(tokens)
             equal_len_tokens = equal_len_tokens[batch_size:]
             mask = torch.tensor(attention_mask[:batch_size], dtype=torch.float)
@@ -117,10 +131,10 @@ def generate(
     for sequence in new_logits:
         #print("Sequence shape in generate")
         #print(sequence.shape)
-        probabilities = softmax_with_temperature(sequence[-1*max_new_tokens - 1: -1, :], temperature)
-        #print(probabilities.shape)
+        probabilities = softmax_with_temperature(sequence[-1*max_new_tokens - 1:, :], temperature)
+        #print(probabilities)
         new_token_encodings = torch.multinomial(probabilities, num_samples=1)
-        #print(new_tokens.shape)
+        #print(new_token_encodings)
         generated_tokens = []
         generation = ""
         for new_token_encoding in new_token_encodings:
@@ -170,15 +184,16 @@ def main():
     config = args.config
     with open(args.prefixes) as f:
         questions = [line[:-1] for line in f]
+    #print(questions)
     max_new_tokens = args.max_new_tokens
     temperature = args.temperature
 
     # initialize tokenizer and model
     model_path = os.path.join(config.output_dir, "model.pt")
     assert os.path.exists(model_path), f"no model checkpoint at {model_path}"
-    tokenizer = tiktoken.get_encoding(config.tokenizer_encoding)
+    tokenizer = UnicodeBPETokenizer.from_config("outputs/GPT-tiny/Unicode_tokenizer.config") #tiktoken.get_encoding(config.tokenizer_encoding)
     device = determine_device() if config.device == "auto" else config.device
-    model = DecoderLM(tokenizer.n_vocab, **config.model_config).to(device)
+    model = DecoderLM(65536, **config.model_config).to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
 
     # generate and save outputs

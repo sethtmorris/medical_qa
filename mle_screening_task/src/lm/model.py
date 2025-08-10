@@ -334,7 +334,7 @@ class DecoderLM(nn.Module):
 
     def embed(
         self,
-        input_ids: torch.LongTensor,
+        input_ids: torch.uint16,
         attention_mask: torch.FloatTensor | None = None,
     ) -> torch.FloatTensor:
         """Convert input_ids to embeddings (token_embeddings + positional_embeddings).
@@ -379,21 +379,24 @@ class DecoderLM(nn.Module):
         #token_embeddings = token_embeddings.to(input_ids.device) # ...
 
         if attention_mask is not None:
-            position_ids = (attention_mask.long().cumsum(-1) - 1).clamp(0)
+            position_ids = (attention_mask.int().cumsum(-1) - 1).clamp(0)
             #print(attention_mask)
             # attention_mask = attention_mask.to(input_ids.device)
             # position_ids = torch.clamp(torch.sub(torch.cumsum(attention_mask, dim=1), 1), min=0)
             #print(position_ids)
             #position_ids = (attention_mask.long().cumsum(-1) - 1).clamp(0)
         else:
-            position_ids = torch.arange(s, device=input_ids.device, dtype=torch.long)
+            position_ids = torch.arange(s, device=input_ids.device, dtype=torch.int)
             #print(position_ids)
         #print(self.position_embeddings.weight.shape)
         #print(position_ids)
-        new_token_embeddings = self.token_embeddings(input_ids) #F.embedding(position_ids.int().to(input_ids.device), self.position_embeddings.weight.to(input_ids.device)) # ...
+        #print(input_ids.shape)
+        new_token_embeddings = self.token_embeddings(input_ids.int()) #F.embedding(position_ids.int().to(input_ids.device), self.position_embeddings.weight.to(input_ids.device)) # ...
+        #print(position_ids.shape)
         new_positional_embeddings = self.position_embeddings(position_ids) #.to(token_embeddings.device)
         #print(positional_embeddings)
-
+        #print(new_token_embeddings.shape)
+        #print(new_positional_embeddings.shape)
         return self.dropout(new_token_embeddings + new_positional_embeddings) #self.dropout(token_embeddings + positional_embeddings)
 
     def token_logits(self, x: torch.FloatTensor) -> torch.FloatTensor:
@@ -414,7 +417,7 @@ class DecoderLM(nn.Module):
 
     def forward(
         self,
-        input_ids: torch.LongTensor,
+        input_ids: torch.uint16,
         attention_mask: torch.FloatTensor | None = None,
     ) -> torch.FloatTensor:
         """A forward pass of the decoder LM, converting input_ids to token logits.

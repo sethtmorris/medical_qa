@@ -264,9 +264,9 @@ class UnicodeBPETokenizer:
         Returns:
             str: A Unicode (UTF-8) string.
         """
-        return b"".join([self.vocab[token_id] for token_id in token_ids]).decode(
-            "utf-8", errors="ignore"
-        )
+        #print(token_ids)
+        #print(self.vocab)
+        return "".join([self.vocab[token_id].decode("utf-8", errors="ignore") if token_id < len(self.vocab) else "" for token_id in token_ids])
 
     @classmethod
     def from_config(cls, config_file: str):

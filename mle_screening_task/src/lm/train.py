@@ -27,11 +27,11 @@ from lm.utils import (
 )
 
 import csv
-from bpe import UnicodeBPETokenizer
+from lm.tokenizer.bpe import UnicodeBPETokenizer
 
 def random_batch_sampler(
-    tokens: torch.LongTensor, device: str, batch_size: int, seq_len: int
-) -> Iterator[torch.LongTensor]:
+    tokens: torch.uint16, device: str, batch_size: int, seq_len: int
+) -> Iterator[torch.uint16]:
     """An infinite generator that samples batches of sequences from the tokens.
 
     Args:
@@ -47,22 +47,22 @@ def random_batch_sampler(
         output tensor should be on the right device.
     """
 
+    '''
+    if tokens.size(dim=0) >= batch_size*seq_len:
+        random_index = torch.randint(0, tokens.size(dim=0) - batch_size*seq_len, (1,)).item()
+        yield torch.reshape(tokens[random_index:random_index+batch_size*seq_len], (batch_size, seq_len)).to(device) #torch.reshape(tokens, (-1, batch_size, seq_len)) #torch.reshape(next(iter(DataLoader(tokens, batch_size=seq_len*batch_size, shuffle=True))), (batch_size, seq_len)) #torch.tensor(list(tokens[start_index:(start_index + seq_len)] for start_index in list(torch.randint(0, len(tokens) - seq_len, (batch_size,), device=device)))) # torch.LongTensor(batch_size * tokens.randperm(seq_len)[:batch_size]).to(device) # torch.LongTensor(batch_size * sample_tensor(tokens, seq_len)) # 
+    else:
+        yield tokens.to(device)
+    '''
     while True:
-        '''
-        if tokens.size(dim=0) >= batch_size*seq_len:
-            random_index = torch.randint(0, tokens.size(dim=0) - batch_size*seq_len, (1,)).item()
-            yield torch.reshape(tokens[random_index:random_index+batch_size*seq_len], (batch_size, seq_len)).to(device) #torch.reshape(tokens, (-1, batch_size, seq_len)) #torch.reshape(next(iter(DataLoader(tokens, batch_size=seq_len*batch_size, shuffle=True))), (batch_size, seq_len)) #torch.tensor(list(tokens[start_index:(start_index + seq_len)] for start_index in list(torch.randint(0, len(tokens) - seq_len, (batch_size,), device=device)))) # torch.LongTensor(batch_size * tokens.randperm(seq_len)[:batch_size]).to(device) # torch.LongTensor(batch_size * sample_tensor(tokens, seq_len)) # 
-        else:
-            yield tokens.to(device)
-        '''
         offsets = torch.randint(len(tokens) - seq_len + 1, (batch_size,))
         input_ids = torch.stack([tokens[i: i + seq_len] for i in offsets])
         yield input_ids.to(device)
 
 
 def sequential_batch_sampler(
-    tokens: torch.LongTensor, device: str, batch_size: int, seq_len: int
-) -> Iterator[torch.LongTensor]:
+    tokens: torch.uint16, device: str, batch_size: int, seq_len: int
+) -> Iterator[torch.uint16]:
     """A generator that yields batches of tokens.
 
     Args:
@@ -82,8 +82,8 @@ def sequential_batch_sampler(
         the last batch.
     """
 
-#    for batch in torch.reshape(torch.tensor(torch.split(tokens, batch_size*seq_len)), (batch_size, seq_len)): #range(0, tokens.size(dim=0) - seq_len, seq_len):
-#        yield batch.to(device)
+    #for batch in torch.reshape(torch.tensor(torch.split(tokens, batch_size*seq_len)), (batch_size, seq_len)): #range(0, tokens.size(dim=0) - seq_len, seq_len):
+    #    yield batch.to(device)
     #for batch in DataLoader(tokens, batch_size=seq_len*batch_size, shuffle=True):
     #    yield torch.reshape(batch, (batch_size, seq_len))
     '''
@@ -93,6 +93,7 @@ def sequential_batch_sampler(
         batch = tokens[i * batch_size * seq_len : (i + 1) * batch_size * seq_len].view(batch_size, seq_len)
         yield batch.to(device)
     '''
+    #print(tokens.shape)
     offset = 0
     tokens_per_batch = batch_size * seq_len
     while offset + tokens_per_batch <= len(tokens):
@@ -121,13 +122,10 @@ def cosine_lr_schedule(
         assert num_training_steps >= num_warmup_steps >= 0
 
         if t <= num_warmup_steps:
-            lr = max_lr * t / num_warmup_steps
+            return max_lr * t / num_warmup_steps
         elif t >= num_training_steps:
-            lr = min_lr
-        else:  # t >= num_training_steps
-            #print(str((t-num_warmup_steps)/(num_training_steps-num_warmup_steps)))
-            lr = 0.5 * (max_lr - min_lr) * (1 + math.cos(math.pi * (t - num_warmup_steps)/(num_training_steps - num_warmup_steps)))
-        return lr
+            return min_lr
+        return (max_lr - min_lr) / 2 * math.cos(math.pi * (t - num_warmup_steps)/(num_training_steps - num_warmup_steps)) + (min_lr + max_lr) / 2
 
     return get_lr
 
@@ -138,7 +136,7 @@ def set_lr(optimizer: torch.optim.Optimizer, lr: float) -> None:
 
 
 def compute_language_modeling_loss(
-    input_ids: torch.LongTensor, logits: torch.FloatTensor
+    input_ids: torch.uint16, logits: torch.FloatTensor
 ) -> torch.FloatTensor:
     """Outputs the language modeling loss given input_ids and logits
 
@@ -166,7 +164,7 @@ def compute_language_modeling_loss(
     #ces = torch.nn.CrossEntropyLoss()
     #loss = torch.FloatTensor([0.])
     # loss = F.cross_entropy(logits[:labels.size(-1), :], labels) #for batch in range(labels.size(0))] #torch.mean(torch.tensor([F.cross_entropy(logits[batch], labels[batch]) for batch in range(input_ids.size(0))])) #, ignore_index=-1) #F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1), ignore_index=-1)
-    labels = rearrange(input_ids[: , 1:], "b s -> (b s)")
+    labels = rearrange(input_ids[: , 1:].long(), "b s -> (b s)")
     logits = rearrange(logits[:, :-1], "b s v -> (b s) v")
 
     return F.cross_entropy(logits, labels)
@@ -174,7 +172,7 @@ def compute_language_modeling_loss(
 
 def train(
     model: DecoderLM,
-    batch_sampler: Iterator[torch.LongTensor],
+    batch_sampler: Iterator[torch.uint16],
     optimizer: torch.optim.Optimizer,
     lr_schedule: Callable[[int], float],
     autocast: torch.autocast | nullcontext = nullcontext(),
@@ -210,6 +208,7 @@ def train(
         for _ in range(grad_accumulation_steps):
             # TODO: sample a batch, generate logits and compute loss
             input_ids = next(batch_sampler)
+            #print(input_ids.shape)
             '''
             if len(list(input_ids.shape)) == 1:
             	input_ids = torch.reshape(input_ids, (-1, input_ids.size(-1)))
@@ -251,7 +250,7 @@ def train(
 @torch.inference_mode()
 def evaluate(
     model: DecoderLM,
-    batch_sampler: Iterator[torch.LongTensor],
+    batch_sampler: Iterator[torch.uint16],
     autocast: torch.autocast | nullcontext = nullcontext(),
 ) -> dict[str, float]:
     losses = []
@@ -283,7 +282,7 @@ def main():
     os.makedirs(config.output_dir, exist_ok=True)
     OmegaConf.save(config, os.path.join(config.output_dir, "config.yaml"))
     print("#" * 40, OmegaConf.to_yaml(config).strip(), "#" * 40, sep="\n")
-    wandb.init(project="supportiv", config=OmegaConf.to_container(config))
+    wandb.init(project="custom-gpt", config=OmegaConf.to_container(config))
 
     # initialize tokenizer and model
     #tokenizer = tiktoken.get_encoding(config.tokenizer_encoding)
@@ -293,8 +292,8 @@ def main():
     device = determine_device() if config.device == "auto" else config.device
     #print(determine_device())
     #device = torch.device("cuda")
-    model = DecoderLM(256, **config.model_config).to(device)
-    # if torch.cuda.is_available(): model.to(torch.device("cuda"))
+    model = DecoderLM(65536, **config.model_config).to(device)
+    if torch.cuda.is_available(): model.to(torch.device("cuda"))
     print(f"model parameters = {count_params(model) / 1e6:.0f}M")
 
     #model_disk_size_MB = estimate_model_disk_size(model) * 1e-6
@@ -319,29 +318,40 @@ def main():
 
     #input_ids = tokenizer.encode(text_data, add_special_tokens=True) #np.load("data/tokens.npz")
     #tokenizer = new UnicodeBPETokenizer()
-    tokenizer = UnicodeBPETokenizer.from_data(text_data, 100)
-    n_qa = len(qa_list)
-    tokens = []
-    for i, qa in enumerate(qa_list):
-        tokens.append(tokenizer.encode(text_data))
-        print(f"Trained on {i} out of {n_qa} examples.")
+    tokenizer = UnicodeBPETokenizer.from_data(text_data, 65000)
+    tokenizer.save("outputs/GPT-tiny/Unicode_tokenizer.config")
+    #n_qa = len(qa_list)
+    #sample_limit = 256
+    tokens = torch.empty(0, dtype=torch.uint16)
+    for i, qa in enumerate(qa_list[:sample_limit]):
+        #print(f"Encoding example {i}")
+        encoded_tokens = tokenizer.encode(qa)
+        pad_length = config.seq_len - len(encoded_tokens)
+        pad = torch.full((pad_length,), 65535, dtype=torch.uint16)
+        front_padded_input = torch.cat((pad, torch.tensor(encoded_tokens, dtype=torch.uint16)))
+        tokens = torch.cat((tokens, front_padded_input))
+
+    #tokens = torch.tensor(tokens, dtype=torch.uint8)
+    #print(tokens.shape)
 
     train_n = int(0.8 * len(tokens))
     #print(train_n)
 
     n_qa = len(q_list)
-    test_n = int(0.8 * n_qa)
+    #test_n = 154 #int(0.8 * n_qa)
 
     prefixed_question_file_path = "data/prefixed_test_questions.txt"
     with open(prefixed_question_file_path, 'w') as question_file:
-        question_file.writelines(q_list[test_n:])
+        question_file.writelines(q_list[train_n:])
 
     test_answers_file_path = "data/test_answers.txt"
     with open(test_answers_file_path, 'w') as answer_file:
-        answer_file.writelines(a_list[test_n:])
+        answer_file.writelines(a_list[train_n:])
 
-    train_tokens = torch.tensor(tokens[:train_n])
-    val_tokens = torch.tensor(tokens[train_n:])
+    train_tokens = tokens[:train_n]
+    print("Train tokens:")
+    print(train_tokens)
+    val_tokens = tokens[train_n:]
 
     train_sampler = random_batch_sampler(
         train_tokens, device, config.batch_size, config.seq_len
